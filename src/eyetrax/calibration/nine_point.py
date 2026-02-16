@@ -42,5 +42,3 @@ def run_9_point_calibration(gaze_estimator, camera_index: int = 0):
     feats, targs = res
     if feats:
         gaze_estimator.train(np.array(feats), np.array(targs))
-
-

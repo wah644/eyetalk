@@ -38,7 +38,6 @@ def make_kalman(
 
 from .base import BaseSmoother
 from .kalman import KalmanSmoother
-from .kalman_ema import KalmanEMASmoother
 from .kde import KDESmoother
 from .noop import NoSmoother
 
@@ -46,7 +45,6 @@ __all__ = [
     "make_kalman",
     "BaseSmoother",
     "KalmanSmoother",
-    "KalmanEMASmoother",
     "KDESmoother",
     "NoSmoother",
 ]

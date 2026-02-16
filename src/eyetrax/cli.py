@@ -7,15 +7,9 @@ def parse_common_args():
 
     parser.add_argument(
         "--filter",
-        choices=["kalman", "kalman_ema", "kde", "none"],
+        choices=["kalman", "kde", "none"],
         default="none",
-        help="Select the filter to apply to gaze estimation",
-    )
-    parser.add_argument(
-        "--ema-alpha",
-        type=float,
-        default=0.25,
-        help="EMA smoothing strength for kalman_ema (0 disables EMA, closer to 1 is smoother)",
+        help="Select the filter to apply to gaze estimation, options are 'kalman', 'kde', or 'none'",
     )
     parser.add_argument(
         "--camera",
@@ -25,27 +19,9 @@ def parse_common_args():
     )
     parser.add_argument(
         "--calibration",
-        choices=["9p", "5p", "lissajous", "dense"],
+        choices=["9p", "5p", "lissajous", "vertical"],
         default="9p",
-        help="Calibration method for gaze estimation",
-    )
-    parser.add_argument(
-        "--grid-rows",
-        type=int,
-        default=5,
-        help="Grid rows for dense calibration (default 5)",
-    )
-    parser.add_argument(
-        "--grid-cols",
-        type=int,
-        default=5,
-        help="Grid columns for dense calibration (default 5)",
-    )
-    parser.add_argument(
-        "--grid-margin",
-        type=float,
-        default=0.10,
-        help="Margin ratio for dense calibration (default 0.10 = 10%)",
+        help="Calibration method for gaze estimation, options are '9p', '5p', or 'lissajous'",
     )
     parser.add_argument(
         "--background",
@@ -70,6 +46,23 @@ def parse_common_args():
         default=None,
         help="Path to a previously-trained gaze model",
     )
+    parser.add_argument(
+        "--scan-path",
+        action="store_true",
+        default=False,
+        help="Enable visualization of eye scan path on screen",
+    )
+    parser.add_argument(
+        "--scan-path-max",
+        type=int,
+        default=500,
+        help="Maximum number of points to keep in scan path (default: 500)",
+    )
+    parser.add_argument(
+        "--scan-path-log",
+        type=str,
+        default=None,
+        help="Path to save scan path log file (CSV format). If not specified, saves to 'scan_path_<timestamp>.csv' on exit",
+    )
 
     return parser.parse_args()
-
