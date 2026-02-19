@@ -105,6 +105,7 @@ def _pulse_and_capture(
             radius = 15 + int(15 * abs(np.sin(2 * np.pi * e)))
             final_radius = radius
             cv2.circle(canvas, (x, y), radius, (0, 255, 0), -1)
+            cv2.circle(canvas, (x, y), 5, (0, 0, 0), -1)
             cv2.imshow("Calibration", canvas)
             if cv2.waitKey(1) == 27:
                 return None
@@ -119,6 +120,7 @@ def _pulse_and_capture(
                 continue
             canvas = np.zeros((sh, sw, 3), dtype=np.uint8)
             cv2.circle(canvas, (x, y), final_radius, (0, 255, 0), -1)
+            cv2.circle(canvas, (x, y), 5, (0, 0, 0), -1)
             t = e / cd_d
             ease = t * t * (3 - 2 * t)
             ang = 360 * (1 - ease)

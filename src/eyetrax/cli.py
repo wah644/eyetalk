@@ -64,5 +64,11 @@ def parse_common_args():
         default=None,
         help="Path to save scan path log file (CSV format). If not specified, saves to 'scan_path_<timestamp>.csv' on exit",
     )
+    parser.add_argument(
+        "--cursor",
+        action="store_true",
+        default=False,
+        help="Enable gaze cursor dot and scan path trail overlay",
+    )
 
     return parser.parse_args()

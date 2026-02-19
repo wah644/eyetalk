@@ -57,8 +57,10 @@ WORD_PANEL_DWELL_TIME = 1.5       # Seconds to dwell at center to select a word
 WORD_PANEL_ORDER = [4, 2, 0, 1, 3]
 
 # Load dictionary from words.txt file
-def load_dictionary(filepath="words.txt"):
+def load_dictionary(filepath=None):
     """Load words from a text file (one word per line)"""
+    if filepath is None:
+        filepath = Path(__file__).parent / "words.txt"
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             words = [line.strip().lower() for line in f if line.strip()]
@@ -148,8 +150,10 @@ class T9Trie:
 #                   BIGRAM MODEL
 # ============================================================
 
-def load_bigrams(filepath="bigram.txt"):
+def load_bigrams(filepath=None):
     """Load bigrams from a text file with format: 'word1 word2    frequency'"""
+    if filepath is None:
+        filepath = Path(__file__).parent / "Bigram.txt"
     bigrams: dict[str, list[tuple[str, int]]] = {}
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -465,6 +469,7 @@ class KeyboardController:
 
         self.current_key_sequence = []
         self.current_predictions: list[str] = []
+        self.current_ngram_predictions: list[str] = []
         self.selected_prediction_idx = 0
 
         # Bigram model
@@ -643,9 +648,10 @@ class KeyboardController:
         self.typed_text += text
         with open(OUTPUT_FILE, "a") as f:
             f.write(text)
-        self.current_key_sequence   = []
-        self.current_predictions    = []
-        self.selected_prediction_idx = 0
+        self.current_key_sequence      = []
+        self.current_predictions       = []
+        self.current_ngram_predictions = []
+        self.selected_prediction_idx   = 0
 
     def _update_predictions(self):
         """Update word predictions based on current key sequence (max 5)."""
@@ -653,6 +659,10 @@ class KeyboardController:
             self.current_key_sequence, max_results=5
         )
         self.selected_prediction_idx = 0
+        if self.current_predictions:
+            self.current_ngram_predictions = self.bigram.get_predictions(self.current_predictions[0])
+        else:
+            self.current_ngram_predictions = []
 
     def handle_backspace(self):
         """Handle backspace gesture (looking above screen)"""
@@ -764,6 +774,32 @@ class KeyboardController:
                 cv2.putText(canvas, f"{idx + 1}. {word}",
                             (panel_x + 15, y),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+
+        # Ngram predictions panel (right side)
+        if self.current_ngram_predictions:
+            panel_width  = 400
+            panel_x_right = self.screen_width - 50 - panel_width
+            panel_y      = 200
+
+            overlay = canvas.copy()
+            cv2.rectangle(
+                overlay,
+                (panel_x_right, panel_y),
+                (panel_x_right + panel_width,
+                 panel_y + 60 + len(self.current_ngram_predictions) * 50),
+                (30, 10, 40), -1
+            )
+            cv2.addWeighted(overlay, 0.85, canvas, 0.15, 0, canvas)
+
+            cv2.putText(canvas, "Next Word:",
+                        (panel_x_right + 10, panel_y + 35),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 100, 255), 2, cv2.LINE_AA)
+
+            for idx, word in enumerate(self.current_ngram_predictions):
+                y = panel_y + 60 + idx * 50
+                cv2.putText(canvas, f"{idx + 1}. {word}",
+                            (panel_x_right + 15, y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 255), 2, cv2.LINE_AA)
 
         # Key sequence display
         if self.current_key_sequence:
@@ -1004,7 +1040,8 @@ def run_demo():
     calibration_method = args.calibration
     background_path = args.background
     confidence_level = args.confidence
-    scan_path_enabled = args.scan_path
+    cursor_enabled = args.cursor
+    scan_path_enabled = args.scan_path or args.cursor
     scan_path_max = args.scan_path_max
     scan_path_log = args.scan_path_log
 
@@ -1236,9 +1273,9 @@ def run_demo():
                 # Label
                 cv2.putText(canvas, "HOME", (bar_x, bar_y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 150, 255), 2, cv2.LINE_AA)
 
-            # Cursor is disabled (invisible)
-            # if x_pred is not None and y_pred is not None and cursor_alpha > 0:
-            #     draw_cursor(canvas, x_pred, y_pred, cursor_alpha)
+            # Draw cursor if enabled via --cursor flag
+            if cursor_enabled and x_pred is not None and y_pred is not None and cursor_alpha > 0:
+                draw_cursor(canvas, x_pred, y_pred, cursor_alpha)
 
             # Draw camera thumbnail
             thumb = make_thumbnail(frame, size=(cam_width, cam_height), border=BORDER)

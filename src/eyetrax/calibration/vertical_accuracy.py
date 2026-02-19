@@ -3,7 +3,6 @@ import time
 import cv2
 import numpy as np
 
-from eyetrax.calibration.vertical_enhanced_calibration import run_vertical_enhanced_calibration
 from eyetrax.calibration.common import wait_for_face_and_countdown
 from eyetrax.utils.screen import get_screen_size
 
@@ -12,16 +11,10 @@ def run_vertical_accuracy_test(gaze_estimator, camera_index: int = 0):
     """
     Tests vertical accuracy by displaying 7 points along the vertical center
     and measuring the error between predicted gaze and actual target positions.
-    
-    First runs the enhanced vertical calibration, then tests accuracy.
-    
+
     Returns:
         dict: Results containing errors, predictions, and targets
     """
-    # Run calibration first using the enhanced vertical calibration
-    print("[Accuracy Test] Running enhanced vertical calibration first...")
-    run_vertical_enhanced_calibration(gaze_estimator, camera_index)
-    
     sw, sh = get_screen_size()
     
     # Create 7 points along vertical center with margins
