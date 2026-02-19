@@ -148,64 +148,38 @@ class T9Trie:
 #                   BIGRAM MODEL
 # ============================================================
 
-class BigramModel:
-    """Simple bigram model for next-word prediction."""
+def load_bigrams(filepath="bigram.txt"):
+    """Load bigrams from a text file with format: 'word1 word2    frequency'"""
+    bigrams: dict[str, list[tuple[str, int]]] = {}
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                word1, word2 = parts[0].lower(), parts[1].lower()
+                try:
+                    freq = int(parts[2])
+                except ValueError:
+                    continue
+                bigrams.setdefault(word1, []).append((word2, freq))
+        for word in bigrams:
+            bigrams[word].sort(key=lambda x: x[1], reverse=True)
+        count = sum(len(v) for v in bigrams.values())
+        print(f"[Bigram] Loaded {count} bigram entries from {filepath}")
+    except FileNotFoundError:
+        print(f"[Bigram] Warning: {filepath} not found, bigram predictions unavailable")
+    return bigrams
 
-    SAMPLE_DATA = [
-        # (current_word, next_word, frequency)
-        ("hi",    "how",      5),
-        ("hi",    "there",    3),
-        ("hi",    "everyone", 2),
-        ("hi",    "friend",   1),
-        ("hi",    "all",      1),
-        ("how",   "are",     10),
-        ("how",   "is",       7),
-        ("how",   "do",       4),
-        ("how",   "was",      3),
-        ("how",   "have",     2),
-        ("are",   "you",      8),
-        ("are",   "we",       5),
-        ("are",   "they",     3),
-        ("are",   "things",   2),
-        ("are",   "ok",       1),
-        ("you",   "doing",    6),
-        ("you",   "ok",       4),
-        ("you",   "there",    2),
-        ("you",   "coming",   3),
-        ("you",   "ready",    2),
-        ("i",     "am",       9),
-        ("i",     "want",     7),
-        ("i",     "need",     5),
-        ("i",     "think",    4),
-        ("i",     "have",     3),
-        ("am",    "fine",     8),
-        ("am",    "good",     6),
-        ("am",    "here",     4),
-        ("am",    "ok",       3),
-        ("am",    "ready",    2),
-        ("what",  "is",      10),
-        ("what",  "are",      8),
-        ("what",  "do",       6),
-        ("what",  "time",     4),
-        ("what",  "happened", 3),
-        ("hello", "how",      7),
-        ("hello", "there",    5),
-        ("hello", "everyone", 3),
-        ("hello", "friend",   2),
-        ("hello", "world",    1),
-        ("the",   "best",     8),
-        ("the",   "time",     7),
-        ("the",   "way",      5),
-        ("the",   "end",      3),
-        ("the",   "day",      2),
-    ]
+
+class BigramModel:
+    """Bigram model for next-word prediction loaded from bigram.txt."""
 
     def __init__(self):
-        self.bigrams: dict[str, list[tuple[str, int]]] = {}
-        for current, next_word, freq in self.SAMPLE_DATA:
-            self.bigrams.setdefault(current, []).append((next_word, freq))
-        for word in self.bigrams:
-            self.bigrams[word].sort(key=lambda x: x[1], reverse=True)
+        self.bigrams = load_bigrams()
 
     def get_predictions(self, current_word: str, max_results: int = 5) -> list[str]:
         """Return top next-word predictions for *current_word*."""
