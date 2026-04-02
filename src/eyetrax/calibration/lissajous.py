@@ -5,9 +5,13 @@ from eyetrax.calibration.common import wait_for_face_and_countdown
 from eyetrax.utils.screen import get_screen_size
 
 
-def run_lissajous_calibration(gaze_estimator, camera_index: int = 0):
+def run_lissajous_calibration(gaze_estimator, camera_index: int = 0,
+                              train: bool = True):
     """
-    Moves a calibration point along a Lissajous curve
+    Moves a calibration point along a Lissajous curve.
+
+    When *train* is False the raw (features, targets) arrays are returned
+    instead of training the model.
     """
     sw, sh = get_screen_size()
 
@@ -15,7 +19,7 @@ def run_lissajous_calibration(gaze_estimator, camera_index: int = 0):
     if not wait_for_face_and_countdown(cap, gaze_estimator, sw, sh, 2):
         cap.release()
         cv2.destroyAllWindows()
-        return
+        return None
 
     A, B, a, b, d = sw * 0.4, sh * 0.4, 3, 2, 0
 
@@ -56,5 +60,11 @@ def run_lissajous_calibration(gaze_estimator, camera_index: int = 0):
 
     cap.release()
     cv2.destroyAllWindows()
-    if feats:
-        gaze_estimator.train(np.array(feats), np.array(targs))
+    if not feats:
+        return None
+
+    X, y_arr = np.array(feats), np.array(targs)
+    if train:
+        gaze_estimator.train(X, y_arr)
+        return None
+    return X, y_arr

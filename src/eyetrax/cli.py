@@ -70,5 +70,48 @@ def parse_common_args():
         default=False,
         help="Enable gaze cursor dot and scan path trail overlay",
     )
+    parser.add_argument(
+        "--multi-pose",
+        action="store_true",
+        default=False,
+        help="Enable multi-pose calibration (collect samples while moving head for better robustness)",
+    )
+    parser.add_argument(
+        "--landmark-alpha",
+        type=float,
+        default=0.7,
+        help="EMA alpha for raw landmark smoothing (1.0 = no smoothing, lower = more smoothing, default: 0.7)",
+    )
+    parser.add_argument(
+        "--feature-alpha",
+        type=float,
+        default=None,
+        help="EMA alpha for feature vector smoothing (None = disabled, 0.5 = moderate smoothing)",
+    )
+    parser.add_argument(
+        "--pose-damping",
+        type=float,
+        default=0.0,
+        help="Head pose drift compensation (0.0 = off, 1.0 = fully clamp to calibration pose, default: 0.0)",
+    )
+    parser.add_argument(
+        "--multi-position",
+        action="store_true",
+        default=False,
+        help="Run calibration at 3 vertical face positions (above/center/below camera) for position-robust gaze estimation",
+    )
+    parser.add_argument(
+        "--single-column",
+        action="store_true",
+        default=False,
+        help="Use a single center vertical line instead of two lines (vertical calibration only)",
+    )
+    parser.add_argument(
+        "--save-calibration",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="After calibrating, save the model to this file (e.g. my_calib.pkl)",
+    )
 
     return parser.parse_args()

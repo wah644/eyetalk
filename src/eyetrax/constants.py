@@ -40,4 +40,22 @@ MUTUAL_INDICES = [
      58,   # Left jaw
     288,   # Right jaw
 ]
+
+# Raw-image-space face landmarks for camera-relative position encoding.
+# 13 points covering boundary + interior; (x, y) per point = 26 features.
+FACE_POSITION_INDICES = [
+     10,   # Forehead top
+    152,   # Chin
+    234,   # Left temple
+    454,   # Right temple
+     58,   # Left jaw
+    288,   # Right jaw
+      4,   # Nose tip
+      9,   # Between brows
+    151,   # Forehead center
+    168,   # Nose bridge top
+     33,   # Left eye outer corner
+    263,   # Right eye outer corner
+      1,   # Nose base / upper lip
+]
 # fmt: on

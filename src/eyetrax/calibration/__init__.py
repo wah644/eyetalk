@@ -1,9 +1,13 @@
 from .common import compute_grid_points, wait_for_face_and_countdown
 from .five_point import run_5_point_calibration
 from .lissajous import run_lissajous_calibration
+from .multi_position import run_multi_position_calibration
 from .nine_point import run_9_point_calibration
 from .vertical_accuracy import run_vertical_accuracy_test
-from .vertical_enhanced_calibration import run_vertical_enhanced_calibration
+from .vertical_enhanced_calibration import (
+    run_vertical_enhanced_calibration,
+    run_vertical_single_calibration,
+)
 
 
 __all__ = [
@@ -12,6 +16,8 @@ __all__ = [
     "run_9_point_calibration",
     "run_5_point_calibration",
     "run_lissajous_calibration",
+    "run_multi_position_calibration",
     "run_vertical_accuracy_test",
     "run_vertical_enhanced_calibration",
+    "run_vertical_single_calibration",
 ]

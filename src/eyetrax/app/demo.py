@@ -8,6 +8,7 @@ from eyetrax.calibration import (
     run_5_point_calibration,
     run_9_point_calibration,
     run_lissajous_calibration,
+    run_multi_position_calibration,
 )
 from eyetrax.cli import parse_common_args
 from eyetrax.filters import KalmanSmoother, KDESmoother, NoSmoother, make_kalman
@@ -26,16 +27,30 @@ def run_demo():
     background_path = args.background
     confidence_level = args.confidence
 
-    gaze_estimator = GazeEstimator(model_name=args.model)
+    gaze_estimator = GazeEstimator(
+        model_name=args.model,
+        landmark_alpha=args.landmark_alpha,
+        feature_alpha=args.feature_alpha,
+        include_face_position=args.multi_position,
+    )
+    gaze_estimator._pose_damping = args.pose_damping
 
     if args.model_file and os.path.isfile(args.model_file):
         gaze_estimator.load_model(args.model_file)
         print(f"[demo] Loaded gaze model from {args.model_file}")
+    elif args.multi_position:
+        run_multi_position_calibration(
+            gaze_estimator, camera_index=camera_index,
+            calibration_method=calibration_method, multi_pose=args.multi_pose,
+        )
     else:
+        mp = args.multi_pose
         if calibration_method == "9p":
-            run_9_point_calibration(gaze_estimator, camera_index=camera_index)
+            run_9_point_calibration(gaze_estimator, camera_index=camera_index,
+                                    multi_pose=mp)
         elif calibration_method == "5p":
-            run_5_point_calibration(gaze_estimator, camera_index=camera_index)
+            run_5_point_calibration(gaze_estimator, camera_index=camera_index,
+                                    multi_pose=mp)
         else:
             run_lissajous_calibration(gaze_estimator, camera_index=camera_index)
 
@@ -64,6 +79,7 @@ def run_demo():
     MARGIN = 20
     cursor_alpha = 0.0
     cursor_step = 0.05
+    x_pred = y_pred = None
 
     with camera(camera_index) as cap, fullscreen("Gaze Estimation"):
         prev_time = time.time()
@@ -71,17 +87,22 @@ def run_demo():
         for frame in iter_frames(cap):
             features, blink_detected = gaze_estimator.extract_features(frame)
 
-            if features is not None and not blink_detected:
+            pose_ok = gaze_estimator.pose_within_tolerance()
+
+            if features is not None and not blink_detected and pose_ok:
                 gaze_point = gaze_estimator.predict(np.array([features]))[0]
                 x, y = map(int, gaze_point)
                 x_pred, y_pred = smoother.step(x, y)
                 contours = smoother.debug.get("contours", [])
                 cursor_alpha = min(cursor_alpha + cursor_step, 1.0)
             else:
-                x_pred = y_pred = None
-                blink_detected = True
+                if not pose_ok:
+                    cursor_alpha = max(cursor_alpha - cursor_step * 2, 0.0)
+                else:
+                    x_pred = y_pred = None
+                    blink_detected = True
+                    cursor_alpha = max(cursor_alpha - cursor_step, 0.0)
                 contours = []
-                cursor_alpha = max(cursor_alpha - cursor_step, 0.0)
 
             canvas = background.copy()
 
@@ -121,6 +142,15 @@ def run_demo():
                 2,
                 cv2.LINE_AA,
             )
+
+            if not pose_ok:
+                warn = "Re-center your head"
+                ws, _ = cv2.getTextSize(warn, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)
+                cv2.putText(
+                    canvas, warn,
+                    ((screen_width - ws[0]) // 2, screen_height // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3, cv2.LINE_AA,
+                )
 
             cv2.imshow("Gaze Estimation", canvas)
             if cv2.waitKey(1) == 27:

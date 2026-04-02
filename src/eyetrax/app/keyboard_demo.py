@@ -7,11 +7,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from eyetrax.app.keyword_to_sentence import (
+    generate_sentence_async,
+    get_pending_result,
+    is_generating,
+)
 from eyetrax.calibration import (
     run_5_point_calibration,
     run_9_point_calibration,
     run_lissajous_calibration,
-    run_vertical_enhanced_calibration,  # NEW - Added vertical calibration
+    run_multi_position_calibration,
+    run_vertical_enhanced_calibration,
 )
 from eyetrax.cli import parse_common_args
 from eyetrax.filters import KalmanSmoother, KDESmoother, NoSmoother, make_kalman
@@ -1045,21 +1051,42 @@ def run_demo():
     scan_path_max = args.scan_path_max
     scan_path_log = args.scan_path_log
 
-    gaze_estimator = GazeEstimator(model_name=args.model)
+    gaze_estimator = GazeEstimator(
+        model_name=args.model,
+        landmark_alpha=args.landmark_alpha,
+        feature_alpha=args.feature_alpha,
+        include_face_position=args.multi_position,
+    )
+    gaze_estimator._pose_damping = args.pose_damping
 
     # Load or calibrate model
     if args.model_file and os.path.isfile(args.model_file):
         gaze_estimator.load_model(args.model_file)
         print(f"[demo] Loaded gaze model from {args.model_file}")
+    elif args.multi_position:
+        run_multi_position_calibration(
+            gaze_estimator, camera_index=camera_index,
+            calibration_method=calibration_method, multi_pose=args.multi_pose,
+            single_column=args.single_column,
+        )
     else:
+        mp = args.multi_pose
         if calibration_method == "9p":
-            run_9_point_calibration(gaze_estimator, camera_index=camera_index)
+            run_9_point_calibration(gaze_estimator, camera_index=camera_index,
+                                    multi_pose=mp)
         elif calibration_method == "5p":
-            run_5_point_calibration(gaze_estimator, camera_index=camera_index)
-        elif calibration_method == "vertical":  # NEW - Added vertical calibration
-            run_vertical_enhanced_calibration(gaze_estimator, camera_index=camera_index)
+            run_5_point_calibration(gaze_estimator, camera_index=camera_index,
+                                    multi_pose=mp)
+        elif calibration_method == "vertical":
+            run_vertical_enhanced_calibration(gaze_estimator, camera_index=camera_index,
+                                              single_column=args.single_column,
+                                              multi_pose=mp)
         else:
             run_lissajous_calibration(gaze_estimator, camera_index=camera_index)
+
+    if args.save_calibration and not (args.model_file and os.path.isfile(args.model_file)):
+        gaze_estimator.save_model(args.save_calibration)
+        print(f"[demo] Calibration saved to {args.save_calibration}")
 
     screen_width, screen_height = get_screen_size()
 
@@ -1104,6 +1131,17 @@ def run_demo():
     gesture_below_start = None  # Track when started looking below
     GESTURE_BACKSPACE_TIME = 2.0  # 2 seconds to trigger backspace
     GESTURE_HOME_TIME = 5.0  # 5 seconds to trigger home
+
+    # Triple-blink detection → triggers LLM sentence generation
+    TRIPLE_BLINK_MAX_GAP = 0.6   # max gap between consecutive blinks
+    TRIPLE_BLINK_MIN_GAP = 0.08  # min gap (filters noise)
+    TRIPLE_BLINK_WINDOW  = 2.0   # total time window for all 3 blinks
+    blink_active = False
+    blink_times: list = []
+    blink_count = 0
+    double_blink_flash_until = 0.0
+    llm_generating = False
+    llm_banner_until = 0.0
 
     def save_scan_path_log():
         """Save scan path to CSV file"""
@@ -1159,6 +1197,58 @@ def run_demo():
                 blink_detected = True
                 contours = []
                 cursor_alpha = max(cursor_alpha - cursor_step, 0.0)
+
+            # ── Triple-blink detection ─────────────────────────────
+            if blink_detected:
+                if not blink_active:
+                    blink_active = True
+            else:
+                if blink_active:
+                    blink_active = False
+                    blink_count += 1
+                    now_ts = time.time()
+                    # Drop blinks outside the rolling window
+                    blink_times = [t for t in blink_times if now_ts - t <= TRIPLE_BLINK_WINDOW]
+                    if blink_times:
+                        gap = now_ts - blink_times[-1]
+                        if TRIPLE_BLINK_MIN_GAP <= gap <= TRIPLE_BLINK_MAX_GAP:
+                            blink_times.append(now_ts)
+                        else:
+                            blink_times = [now_ts]  # gap too large, start fresh
+                    else:
+                        blink_times = [now_ts]
+                    if len(blink_times) >= 3:
+                        double_blink_flash_until = time.time() + 2.0
+                        print(f"[triple-blink] Detected! (blinks={blink_count})")
+                        if current_mode == "keyboard" and not llm_generating:
+                            keywords = keyboard.typed_text.strip()
+                            if keyboard.current_predictions:
+                                keywords += " " + keyboard.current_predictions[0]
+                            keywords = keywords.strip()
+                            if keywords:
+                                print(f"[triple-blink] Sending to LLM: '{keywords}'")
+                                generate_sentence_async(keywords)
+                                llm_generating = True
+                                llm_banner_until = time.time() + 30
+                            else:
+                                print("[triple-blink] No text to send")
+                        blink_times = []
+
+
+            # ── Poll for LLM result ───────────────────────────────
+            if llm_generating:
+                llm_result = get_pending_result()
+                if llm_result is not None:
+                    print(f"[LLM] Result: {llm_result}")
+                    keyboard.typed_text = llm_result + " "
+                    with open(OUTPUT_FILE, "w") as f:
+                        f.write(keyboard.typed_text)
+                    keyboard.current_key_sequence = []
+                    keyboard.current_predictions = []
+                    keyboard.current_ngram_predictions = []
+                    keyboard.selected_prediction_idx = 0
+                    llm_generating = False
+                    llm_banner_until = time.time() + 3
 
             # Check for gesture zones with dwell time (backspace = above, home = below)
             if x_pred is not None and y_pred is not None:
@@ -1310,6 +1400,45 @@ def run_demo():
                 2,
                 cv2.LINE_AA,
             )
+
+            # ── LLM / Double-blink status overlay ─────────────
+            right_x = screen_width - 380
+            cv2.putText(canvas, "Triple-blink: AI sentence",
+                        (right_x, 50), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (200, 200, 200), 1, cv2.LINE_AA)
+            cv2.putText(canvas, f"Blinks: {blink_count}",
+                        (right_x, 80), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (180, 180, 180), 1, cv2.LINE_AA)
+
+            if time.time() < double_blink_flash_until:
+                cv2.putText(canvas, "ACTIVATED",
+                            (right_x, 120), cv2.FONT_HERSHEY_SIMPLEX,
+                            1.0, (0, 255, 0), 2, cv2.LINE_AA)
+
+            if llm_generating:
+                banner_text = "Generating sentence..."
+                ts = cv2.getTextSize(banner_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)[0]
+                bx = (screen_width - ts[0]) // 2
+                by = screen_height // 2
+                cv2.rectangle(canvas, (bx - 20, by - 40),
+                              (bx + ts[0] + 20, by + 15), (40, 40, 40), -1)
+                cv2.rectangle(canvas, (bx - 20, by - 40),
+                              (bx + ts[0] + 20, by + 15), (0, 200, 255), 2)
+                cv2.putText(canvas, banner_text, (bx, by),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 200, 255), 2, cv2.LINE_AA)
+
+            elif time.time() < llm_banner_until and not llm_generating:
+                result_text = keyboard.typed_text.strip()[:80]
+                if result_text:
+                    ts = cv2.getTextSize(result_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                    bx = (screen_width - ts[0]) // 2
+                    by = screen_height // 2
+                    cv2.rectangle(canvas, (bx - 20, by - 40),
+                                  (bx + ts[0] + 20, by + 15), (40, 40, 40), -1)
+                    cv2.rectangle(canvas, (bx - 20, by - 40),
+                                  (bx + ts[0] + 20, by + 15), (0, 255, 100), 2)
+                    cv2.putText(canvas, result_text, (bx, by),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 100), 2, cv2.LINE_AA)
 
             cv2.imshow("Gaze Keyboard", canvas)
             if cv2.waitKey(1) == 27:  # ESC key
