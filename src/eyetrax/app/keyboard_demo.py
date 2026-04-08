@@ -1,8 +1,13 @@
+import sys
 import os
 import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+
+_SRC_ROOT = Path(__file__).resolve().parents[2]
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
 
 import cv2
 import numpy as np
@@ -12,6 +17,7 @@ from eyetrax.app.keyword_to_sentence import (
     get_pending_result,
     is_generating,
 )
+from eyetrax.integrations.adb_emergency import EmergencyCallConfig, trigger_emergency_call
 from eyetrax.calibration import (
     run_5_point_calibration,
     run_9_point_calibration,
@@ -884,17 +890,24 @@ class KeyboardController:
 # ============================================================
 
 # Menu state tracking
-menu_options = ["keyboard", "fixed_phrases", "home_iot"]
-menu_dwell_times = [None, None, None]
-menu_dwell_start = [None, None, None]
+menu_options = ["keyboard", "fixed_phrases", "home_iot", "emergency_call"]
+menu_dwell_times = [None] * len(menu_options)
+menu_dwell_start = [None] * len(menu_options)
 MENU_DWELL_TIME = 1.5
 MENU_BUTTON_WIDTH = 400  # Width of menu buttons (centered)
 MENU_BUTTON_GAP = 20  # Gap between menu buttons
 
+CONFIRM_DWELL_TIME = 1.2
+CONFIRM_BUTTON_WIDTH = 460
+CONFIRM_BUTTON_HEIGHT = 140
+confirm_options = ["yes", "no"]
+confirm_dwell_start = [None] * len(confirm_options)
+
 def get_menu_button_bounds(option_index, screen_width, screen_height):
     """Get the bounding box for a menu button"""
-    available_height = screen_height - (2 * MENU_BUTTON_GAP)  # 2 gaps between 3 buttons
-    button_height = available_height // 3
+    num_buttons = len(menu_options)
+    available_height = screen_height - ((num_buttons - 1) * MENU_BUTTON_GAP)
+    button_height = available_height // max(num_buttons, 1)
 
     y1 = option_index * (button_height + MENU_BUTTON_GAP)
     y2 = y1 + button_height
@@ -911,7 +924,7 @@ def get_hovered_menu_option(x, y, screen_width, screen_height):
         return None
 
     # Check each button's bounds
-    for i in range(3):
+    for i in range(len(menu_options)):
         x1, y1, x2, y2 = get_menu_button_bounds(i, screen_width, screen_height)
         if x1 <= x <= x2 and y1 <= y <= y2:
             return i
@@ -924,7 +937,7 @@ def update_menu(gaze_x, gaze_y, screen_width, screen_height):
     hovered = get_hovered_menu_option(gaze_x, gaze_y, screen_width, screen_height)
 
     # Reset non-hovered options
-    for i in range(3):
+    for i in range(len(menu_options)):
         if i != hovered:
             menu_dwell_start[i] = None
 
@@ -943,11 +956,11 @@ def update_menu(gaze_x, gaze_y, screen_width, screen_height):
     return None
 
 def draw_menu(canvas, screen_width, screen_height, gaze_x=None, gaze_y=None):
-    """Draw the main menu with three centered buttons with gaps"""
+    """Draw the main menu with centered buttons with gaps"""
     hovered = get_hovered_menu_option(gaze_x, gaze_y, screen_width, screen_height)
 
-    menu_labels = ["KEYBOARD", "FIXED PHRASES", "HOME IoT"]
-    menu_colors = [(0, 200, 0), (100, 100, 100), (100, 100, 100)]  # Green for keyboard, gray for others
+    menu_labels = ["KEYBOARD", "FIXED PHRASES", "HOME IoT", "EMERGENCY CALL"]
+    menu_colors = [(0, 200, 0), (100, 100, 100), (100, 100, 100), (0, 0, 255)]
 
     for i, label in enumerate(menu_labels):
         x1, y1, x2, y2 = get_menu_button_bounds(i, screen_width, screen_height)
@@ -1037,6 +1050,89 @@ def draw_menu(canvas, screen_width, screen_height, gaze_x=None, gaze_y=None):
     )
 
 
+def _confirm_button_bounds(option_index: int, screen_width: int, screen_height: int):
+    # Two buttons stacked vertically, centered.
+    gap = 30
+    total_h = (CONFIRM_BUTTON_HEIGHT * 2) + gap
+    top_y = (screen_height - total_h) // 2 + 90
+    x1 = (screen_width - CONFIRM_BUTTON_WIDTH) // 2
+    x2 = x1 + CONFIRM_BUTTON_WIDTH
+    y1 = top_y + option_index * (CONFIRM_BUTTON_HEIGHT + gap)
+    y2 = y1 + CONFIRM_BUTTON_HEIGHT
+    return x1, y1, x2, y2
+
+
+def _get_hovered_confirm_option(x, y, screen_width, screen_height):
+    if x is None or y is None:
+        return None
+    for i in range(len(confirm_options)):
+        x1, y1, x2, y2 = _confirm_button_bounds(i, screen_width, screen_height)
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return i
+    return None
+
+
+def update_emergency_confirm(gaze_x, gaze_y, screen_width, screen_height):
+    global confirm_dwell_start
+    hovered = _get_hovered_confirm_option(gaze_x, gaze_y, screen_width, screen_height)
+    for i in range(len(confirm_options)):
+        if i != hovered:
+            confirm_dwell_start[i] = None
+    if hovered is None:
+        return None
+    if confirm_dwell_start[hovered] is None:
+        confirm_dwell_start[hovered] = time.time()
+    dwell_duration = time.time() - confirm_dwell_start[hovered]
+    if dwell_duration >= CONFIRM_DWELL_TIME:
+        confirm_dwell_start[hovered] = None
+        return confirm_options[hovered]
+    return None
+
+
+def draw_emergency_confirm(canvas, screen_width, screen_height, gaze_x=None, gaze_y=None):
+    hovered = _get_hovered_confirm_option(gaze_x, gaze_y, screen_width, screen_height)
+
+    overlay = canvas.copy()
+    cv2.rectangle(overlay, (0, 0), (screen_width, screen_height), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.55, canvas, 0.45, 0, canvas)
+
+    title = "Are you sure you want to call emergency services?"
+    (tw, th), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+    tx = (screen_width - tw) // 2
+    cv2.putText(canvas, title, (tx, screen_height // 2 - 140),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
+
+    hint = "Look at YES/NO and hold to confirm"
+    (hw, hh), _ = cv2.getTextSize(hint, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+    hx = (screen_width - hw) // 2
+    cv2.putText(canvas, hint, (hx, screen_height // 2 - 105),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 200), 2, cv2.LINE_AA)
+
+    labels = ["YES", "NO"]
+    colors = [(0, 200, 0), (0, 0, 255)]
+    for i, label in enumerate(labels):
+        x1, y1, x2, y2 = _confirm_button_bounds(i, screen_width, screen_height)
+        is_hovered = (i == hovered)
+        bg = (70, 70, 70) if is_hovered else (35, 35, 35)
+        ov = canvas.copy()
+        cv2.rectangle(ov, (x1, y1), (x2, y2), bg, -1)
+        cv2.addWeighted(ov, 0.85, canvas, 0.15, 0, canvas)
+        border = (255, 255, 255) if is_hovered else (120, 120, 120)
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), border, 4 if is_hovered else 2)
+
+        if is_hovered and confirm_dwell_start[i] is not None:
+            progress = min((time.time() - confirm_dwell_start[i]) / CONFIRM_DWELL_TIME, 1.0)
+            cx = (x1 + x2) // 2
+            cy = y1 + 30
+            radius = 26
+            cv2.ellipse(canvas, (cx, cy), (radius, radius), -90, 0, int(360 * progress), (0, 255, 0), 5)
+
+        (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.6, 4)
+        lx = x1 + (x2 - x1 - lw) // 2
+        ly = y1 + (y2 - y1 + lh) // 2 + 10
+        cv2.putText(canvas, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 1.6, colors[i], 4, cv2.LINE_AA)
+
+
 def run_demo():
     """Main demo function with menu and integrated keyboard"""
     args = parse_common_args()
@@ -1105,8 +1201,13 @@ def run_demo():
     # Initialize keyboard controller
     keyboard = KeyboardController(screen_width, screen_height)
 
-    # Mode tracking: "menu", "keyboard", "fixed_phrases", "home_iot"
+    # Mode tracking: "menu", "keyboard", "fixed_phrases", "home_iot", "emergency_confirm"
     current_mode = "menu"
+    emergency_cfg = EmergencyCallConfig(
+        device_serial=None,
+        phone_number="+971559877486",
+        message="hi this is a test",
+    )
 
     # Setup background
     if background_path and os.path.isfile(background_path):
@@ -1288,8 +1389,24 @@ def run_demo():
             if current_mode == "menu":
                 selected_option = update_menu(x_pred, y_pred, screen_width, screen_height)
                 if selected_option:
-                    current_mode = selected_option
-                    print(f"[menu] Selected: {selected_option}")
+                    if selected_option == "emergency_call":
+                        current_mode = "emergency_confirm"
+                        print("[menu] Emergency confirm opened")
+                    else:
+                        current_mode = selected_option
+                        print(f"[menu] Selected: {selected_option}")
+            elif current_mode == "emergency_confirm":
+                decision = update_emergency_confirm(x_pred, y_pred, screen_width, screen_height)
+                if decision == "yes":
+                    print("[menu] Emergency call confirmed")
+                    try:
+                        trigger_emergency_call(emergency_cfg)
+                    except Exception as e:
+                        print(f"[emergency] Failed: {e}")
+                    current_mode = "menu"
+                elif decision == "no":
+                    print("[menu] Emergency call cancelled")
+                    current_mode = "menu"
             elif current_mode == "keyboard":
                 selected_key = keyboard.update(x_pred, y_pred)
                 if selected_key is not None:
@@ -1315,6 +1432,9 @@ def run_demo():
             # Draw based on mode
             if current_mode == "menu":
                 draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
+            elif current_mode == "emergency_confirm":
+                draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
+                draw_emergency_confirm(canvas, screen_width, screen_height, x_pred, y_pred)
             elif current_mode == "keyboard":
                 keyboard.draw(canvas, x_pred, y_pred)
 
