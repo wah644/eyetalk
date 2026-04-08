@@ -1,6 +1,8 @@
 import sys
 import os
 import time
+import shutil
+import subprocess
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -1133,6 +1135,128 @@ def draw_emergency_confirm(canvas, screen_width, screen_height, gaze_x=None, gaz
         cv2.putText(canvas, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 1.6, colors[i], 4, cv2.LINE_AA)
 
 
+def launch_scrcpy(device_serial: str | None = None) -> None:
+    scrcpy = shutil.which("scrcpy")
+    if not scrcpy and os.name == "nt":
+        scrcpy = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "Microsoft",
+            "WinGet",
+            "Packages",
+            "Genymobile.scrcpy_Microsoft.Winget.Source_8wekyb3d8bbwe",
+            "scrcpy-win64-v3.3.4",
+            "scrcpy.exe",
+        )
+        if not os.path.isfile(scrcpy):
+            scrcpy = None
+    if not scrcpy:
+        print("[scrcpy] scrcpy not found on PATH (restart terminal after install)")
+        return
+    cmd = [scrcpy]
+    if device_serial:
+        cmd += ["-s", device_serial]
+    try:
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        print("[scrcpy] launched")
+    except Exception as e:
+        print(f"[scrcpy] failed to launch: {e}")
+
+
+# ============================================================
+#                   IoT SUBMENU (PHONE UI)
+# ============================================================
+
+IOT_DWELL_TIME = 1.2
+iot_options = ["show_phone_ui", "back"]
+iot_dwell_start = [None] * len(iot_options)
+
+
+def _iot_button_bounds(option_index: int, screen_width: int, screen_height: int):
+    w = 520
+    h = 130
+    gap = 30
+    total_h = (h * len(iot_options)) + gap * (len(iot_options) - 1)
+    top_y = (screen_height - total_h) // 2
+    x1 = (screen_width - w) // 2
+    x2 = x1 + w
+    y1 = top_y + option_index * (h + gap)
+    y2 = y1 + h
+    return x1, y1, x2, y2
+
+
+def _get_hovered_iot_option(x, y, screen_width, screen_height):
+    if x is None or y is None:
+        return None
+    for i in range(len(iot_options)):
+        x1, y1, x2, y2 = _iot_button_bounds(i, screen_width, screen_height)
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return i
+    return None
+
+
+def update_iot_menu(gaze_x, gaze_y, screen_width, screen_height):
+    global iot_dwell_start
+    hovered = _get_hovered_iot_option(gaze_x, gaze_y, screen_width, screen_height)
+    for i in range(len(iot_options)):
+        if i != hovered:
+            iot_dwell_start[i] = None
+    if hovered is None:
+        return None
+    if iot_dwell_start[hovered] is None:
+        iot_dwell_start[hovered] = time.time()
+    if time.time() - iot_dwell_start[hovered] >= IOT_DWELL_TIME:
+        iot_dwell_start[hovered] = None
+        return iot_options[hovered]
+    return None
+
+
+def draw_iot_menu(canvas, screen_width, screen_height, gaze_x=None, gaze_y=None):
+    hovered = _get_hovered_iot_option(gaze_x, gaze_y, screen_width, screen_height)
+
+    overlay = canvas.copy()
+    cv2.rectangle(overlay, (0, 0), (screen_width, screen_height), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.45, canvas, 0.55, 0, canvas)
+
+    title = "HOME IoT"
+    (tw, th), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
+    cv2.putText(canvas, title, ((screen_width - tw) // 2, 120),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
+
+    subtitle = "Phone controls"
+    (sw, sh), _ = cv2.getTextSize(subtitle, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+    cv2.putText(canvas, subtitle, ((screen_width - sw) // 2, 160),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2, cv2.LINE_AA)
+
+    labels = ["SHOW PHONE UI", "BACK"]
+    for i, label in enumerate(labels):
+        x1, y1, x2, y2 = _iot_button_bounds(i, screen_width, screen_height)
+        is_hovered = (i == hovered)
+        bg = (70, 70, 70) if is_hovered else (35, 35, 35)
+        ov = canvas.copy()
+        cv2.rectangle(ov, (x1, y1), (x2, y2), bg, -1)
+        cv2.addWeighted(ov, 0.85, canvas, 0.15, 0, canvas)
+        border = (255, 255, 255) if is_hovered else (120, 120, 120)
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), border, 4 if is_hovered else 2)
+
+        if is_hovered and iot_dwell_start[i] is not None:
+            progress = min((time.time() - iot_dwell_start[i]) / IOT_DWELL_TIME, 1.0)
+            cx = (x1 + x2) // 2
+            cy = y1 + 28
+            radius = 24
+            cv2.ellipse(canvas, (cx, cy), (radius, radius), -90, 0, int(360 * progress), (0, 255, 0), 5)
+
+        (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.1, 3)
+        lx = x1 + (x2 - x1 - lw) // 2
+        ly = y1 + (y2 - y1 + lh) // 2 + 6
+        cv2.putText(canvas, label, (lx, ly),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
+
+
 def run_demo():
     """Main demo function with menu and integrated keyboard"""
     args = parse_common_args()
@@ -1201,7 +1325,7 @@ def run_demo():
     # Initialize keyboard controller
     keyboard = KeyboardController(screen_width, screen_height)
 
-    # Mode tracking: "menu", "keyboard", "fixed_phrases", "home_iot", "emergency_confirm"
+    # Mode tracking: "menu", "keyboard", "home_iot", "emergency_confirm"
     current_mode = "menu"
     emergency_cfg = EmergencyCallConfig(
         device_serial=None,
@@ -1395,6 +1519,12 @@ def run_demo():
                     else:
                         current_mode = selected_option
                         print(f"[menu] Selected: {selected_option}")
+            elif current_mode == "home_iot":
+                choice = update_iot_menu(x_pred, y_pred, screen_width, screen_height)
+                if choice == "show_phone_ui":
+                    launch_scrcpy()
+                elif choice == "back":
+                    current_mode = "menu"
             elif current_mode == "emergency_confirm":
                 decision = update_emergency_confirm(x_pred, y_pred, screen_width, screen_height)
                 if decision == "yes":
@@ -1432,6 +1562,9 @@ def run_demo():
             # Draw based on mode
             if current_mode == "menu":
                 draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
+            elif current_mode == "home_iot":
+                draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
+                draw_iot_menu(canvas, screen_width, screen_height, x_pred, y_pred)
             elif current_mode == "emergency_confirm":
                 draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
                 draw_emergency_confirm(canvas, screen_width, screen_height, x_pred, y_pred)

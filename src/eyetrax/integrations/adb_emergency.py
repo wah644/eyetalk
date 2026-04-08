@@ -58,8 +58,30 @@ def adb_cmd(cfg: EmergencyCallConfig, *parts: str) -> list[str]:
     return cmd
 
 
+def _pick_first_device_serial(cfg: EmergencyCallConfig) -> str | None:
+    cp = _run([cfg.adb_path, "devices"], timeout_s=10)
+    for line in (cp.stdout or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of devices"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "device":
+            return parts[0]
+    return None
+
+
 def dial_and_call(cfg: EmergencyCallConfig) -> None:
     number = cfg.phone_number.strip()
+    serial = cfg.device_serial or _pick_first_device_serial(cfg)
+    if not serial:
+        raise RuntimeError("No ADB devices found. Run `adb pair`/`adb connect` first.")
+    cfg = EmergencyCallConfig(
+        adb_path=cfg.adb_path,
+        device_serial=serial,
+        phone_number=cfg.phone_number,
+        message=cfg.message,
+        speak_delay_s=cfg.speak_delay_s,
+    )
 
     # Open dialer with number filled.
     _run(adb_cmd(cfg, "shell", "am", "start", "-a", "android.intent.action.DIAL", "-d", f"tel:{number}"))
