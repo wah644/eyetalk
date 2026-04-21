@@ -19,7 +19,14 @@ from eyetrax.app.keyword_to_sentence import (
     get_pending_result,
     is_generating,
 )
-from eyetrax.integrations.adb_emergency import EmergencyCallConfig, trigger_emergency_call
+from eyetrax.integrations.adb_emergency import (
+    EmergencyCallConfig,
+    ensure_device,
+    get_phone_screen_size,
+    open_url,
+    tap,
+    trigger_emergency_call,
+)
 from eyetrax.calibration import (
     run_5_point_calibration,
     run_9_point_calibration,
@@ -1172,7 +1179,7 @@ def launch_scrcpy(device_serial: str | None = None) -> None:
 # ============================================================
 
 IOT_DWELL_TIME = 1.2
-iot_options = ["show_phone_ui", "back"]
+iot_options = ["show_phone_ui", "play_flappy_bird", "back"]
 iot_dwell_start = [None] * len(iot_options)
 
 
@@ -1232,7 +1239,7 @@ def draw_iot_menu(canvas, screen_width, screen_height, gaze_x=None, gaze_y=None)
     cv2.putText(canvas, subtitle, ((screen_width - sw) // 2, 160),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2, cv2.LINE_AA)
 
-    labels = ["SHOW PHONE UI", "BACK"]
+    labels = ["SHOW PHONE UI", "PLAY FLAPPY BIRD", "BACK"]
     for i, label in enumerate(labels):
         x1, y1, x2, y2 = _iot_button_bounds(i, screen_width, screen_height)
         is_hovered = (i == hovered)
@@ -1332,6 +1339,11 @@ def run_demo():
         phone_number="+971559877486",
         message="hi this is a test",
     )
+    phone_cfg = EmergencyCallConfig(device_serial=None)
+    flappy_active = False
+    flappy_center: tuple[int, int] | None = None
+    last_flappy_tap = 0.0
+    FLAPPY_TAP_COOLDOWN_S = 0.35
 
     # Setup background
     if background_path and os.path.isfile(background_path):
@@ -1522,9 +1534,33 @@ def run_demo():
             elif current_mode == "home_iot":
                 choice = update_iot_menu(x_pred, y_pred, screen_width, screen_height)
                 if choice == "show_phone_ui":
-                    launch_scrcpy()
+                    try:
+                        phone_cfg = ensure_device(phone_cfg)
+                    except Exception as e:
+                        print(f"[scrcpy] No device: {e}")
+                        phone_cfg = EmergencyCallConfig(device_serial=None)
+                    launch_scrcpy(device_serial=phone_cfg.device_serial)
+                elif choice == "play_flappy_bird":
+                    # Open a browser-based flappy bird and map blinks -> center taps.
+                    try:
+                        phone_cfg = ensure_device(phone_cfg)
+                        # Show the phone UI so the user can see the game.
+                        launch_scrcpy(device_serial=phone_cfg.device_serial)
+                        open_url(phone_cfg, "https://flappybird.io/")
+                        # Give the browser a moment to come to foreground and load.
+                        time.sleep(2.0)
+                        w, h = get_phone_screen_size(phone_cfg)
+                        flappy_center = (w // 2, h // 2)
+                        flappy_active = True
+                        print(f"[flappy] Enabled blink->tap at {flappy_center[0]},{flappy_center[1]}")
+                    except Exception as e:
+                        flappy_active = False
+                        flappy_center = None
+                        print(f"[flappy] Failed to start: {e}")
                 elif choice == "back":
                     current_mode = "menu"
+                    flappy_active = False
+                    flappy_center = None
             elif current_mode == "emergency_confirm":
                 decision = update_emergency_confirm(x_pred, y_pred, screen_width, screen_height)
                 if decision == "yes":
@@ -1541,6 +1577,18 @@ def run_demo():
                 selected_key = keyboard.update(x_pred, y_pred)
                 if selected_key is not None:
                     print(f"[keyboard] Key selected: {keyboard.keys[selected_key] if isinstance(selected_key, int) else selected_key}")
+
+            # Blink-to-tap bridge (IoT flappy mode)
+            if current_mode == "home_iot" and flappy_active and flappy_center and blink_detected:
+                now_ts = time.time()
+                if now_ts - last_flappy_tap >= FLAPPY_TAP_COOLDOWN_S:
+                    try:
+                        tap(phone_cfg, flappy_center[0], flappy_center[1])
+                        last_flappy_tap = now_ts
+                        print(f"[flappy] tap @{flappy_center[0]},{flappy_center[1]}")
+                    except Exception as e:
+                        flappy_active = False
+                        print(f"[flappy] Tap failed, disabled: {e}")
 
             # Draw on canvas
             canvas = background.copy()
@@ -1563,10 +1611,10 @@ def run_demo():
             if current_mode == "menu":
                 draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
             elif current_mode == "home_iot":
-                draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
+                # Dedicated IoT screen
                 draw_iot_menu(canvas, screen_width, screen_height, x_pred, y_pred)
             elif current_mode == "emergency_confirm":
-                draw_menu(canvas, screen_width, screen_height, x_pred, y_pred)
+                # Dedicated confirmation screen (no underlying menu)
                 draw_emergency_confirm(canvas, screen_width, screen_height, x_pred, y_pred)
             elif current_mode == "keyboard":
                 keyboard.draw(canvas, x_pred, y_pred)

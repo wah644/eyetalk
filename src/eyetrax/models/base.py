@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
+from sklearn.exceptions import NotFittedError
 from sklearn.preprocessing import StandardScaler
 
 
@@ -36,7 +37,12 @@ class BaseModel(ABC):
         self._native_train(Xs, y)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        Xs = self.scaler.transform(X)
+        try:
+            Xs = self.scaler.transform(X)
+        except NotFittedError:
+            # Some legacy/hand-built model files may not have a fitted scaler.
+            # Fall back to raw features so inference can still run.
+            Xs = X
         if getattr(self, "variable_scaling", None) is not None:
             Xs *= self.variable_scaling
         return self._native_predict(Xs)
