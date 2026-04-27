@@ -244,13 +244,26 @@ class GazeEstimator:
         return bool(delta[0] <= yaw_tol and delta[1] <= pitch_tol)
 
     def save_model(self, path: str | Path):
-        """
-        Pickle model
-        """
-        self.model.save(path)
+        import pickle
+        payload = {
+            "model": self.model,
+            "vertical_only": getattr(self, "vertical_only", False),
+            "vertical_center_x": getattr(self, "vertical_center_x", None),
+        }
+        with open(path, "wb") as fh:
+            pickle.dump(payload, fh)
 
     def load_model(self, path: str | Path):
-        self.model = BaseModel.load(path)
+        import pickle
+        with open(path, "rb") as fh:
+            data = pickle.load(fh)
+        if isinstance(data, dict) and "model" in data:
+            self.model = data["model"]
+            self.vertical_only = data.get("vertical_only", False)
+            self.vertical_center_x = data.get("vertical_center_x", None)
+        else:
+            # Legacy: plain BaseModel pickle (no vertical_only info)
+            self.model = data
         self.enable_smoothing()
 
     def enable_smoothing(self):

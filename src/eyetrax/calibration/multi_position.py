@@ -11,6 +11,7 @@ from eyetrax.calibration.lissajous import run_lissajous_calibration
 from eyetrax.calibration.nine_point import run_9_point_calibration
 from eyetrax.calibration.vertical_enhanced_calibration import (
     run_vertical_enhanced_calibration,
+    run_vertical_only_calibration,
     run_vertical_single_calibration,
 )
 
@@ -46,6 +47,11 @@ def run_multi_position_calibration(
         )
     elif calibration_method == "vertical_single":
         run_vertical_single_calibration(
+            gaze_estimator, camera_index=camera_index,
+            multi_pose=True, multi_pose_d=HEAD_MOVE_DURATION,
+        )
+    elif calibration_method == "vertical-only":
+        run_vertical_only_calibration(
             gaze_estimator, camera_index=camera_index,
             multi_pose=True, multi_pose_d=HEAD_MOVE_DURATION,
         )

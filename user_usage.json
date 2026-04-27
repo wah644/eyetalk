@@ -1,0 +1,139 @@
+{
+  "words": {
+    "my": 48,
+    "back": 33,
+    "hurts": 30,
+    "please": 33,
+    "raise": 24,
+    "the": 36,
+    "bed": 22,
+    "and": 21,
+    "change": 16,
+    "pillow": 13,
+    "thank": 6,
+    "was": 3,
+    "you": 10,
+    "like": 2,
+    "home": 4,
+    "it": 3,
+    "her": 2,
+    "hell": 2,
+    "piece": 2,
+    "am": 11,
+    "help": 3,
+    "hello": 5,
+    "get": 8,
+    "water": 6,
+    "hi": 3,
+    "can": 4,
+    "me": 4,
+    "how": 3,
+    "are": 3,
+    "name": 2,
+    "oxygen": 3,
+    "future": 2,
+    "so": 1,
+    "have": 1,
+    "to": 1,
+    "those": 2,
+    "hungry": 1,
+    "lions": 1
+  },
+  "bigrams": {
+    "my": {
+      "back": 16,
+      "name": 1
+    },
+    "back": {
+      "hurts": 14,
+      "future": 1,
+      "so": 1
+    },
+    "hurts": {
+      "please": 12
+    },
+    "please": {
+      "raise": 11,
+      "please": 1,
+      "hi": 1
+    },
+    "raise": {
+      "the": 11,
+      "bed": 1
+    },
+    "the": {
+      "bed": 9,
+      "pillow": 6
+    },
+    "bed": {
+      "and": 10
+    },
+    "and": {
+      "change": 8
+    },
+    "change": {
+      "the": 7,
+      "get": 1
+    },
+    "pillow": {
+      "thank": 3
+    },
+    "thank": {
+      "you": 2
+    },
+    "like": {
+      "home": 1
+    },
+    "home": {
+      "it": 1,
+      "get": 1
+    },
+    "it": {
+      "was": 1
+    },
+    "piece": {
+      "please": 1
+    },
+    "am": {
+      "am": 3,
+      "help": 1
+    },
+    "help": {
+      "hello": 1
+    },
+    "hello": {
+      "home": 1,
+      "how": 1
+    },
+    "get": {
+      "water": 1,
+      "me": 1
+    },
+    "water": {
+      "water": 1,
+      "please": 1
+    },
+    "can": {
+      "you": 1
+    },
+    "you": {
+      "get": 1,
+      "my": 1
+    },
+    "how": {
+      "are": 1
+    },
+    "are": {
+      "you": 1
+    },
+    "so": {
+      "have": 1
+    },
+    "have": {
+      "to": 1
+    },
+    "to": {
+      "raise": 1
+    }
+  }
+}

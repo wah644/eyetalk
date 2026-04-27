@@ -5,7 +5,9 @@ from .multi_position import run_multi_position_calibration
 from .nine_point import run_9_point_calibration
 from .vertical_accuracy import run_vertical_accuracy_test
 from .vertical_enhanced_calibration import (
+    run_vertical_center_calibration,
     run_vertical_enhanced_calibration,
+    run_vertical_only_calibration,
     run_vertical_single_calibration,
 )
 
@@ -18,6 +20,8 @@ __all__ = [
     "run_lissajous_calibration",
     "run_multi_position_calibration",
     "run_vertical_accuracy_test",
+    "run_vertical_center_calibration",
     "run_vertical_enhanced_calibration",
+    "run_vertical_only_calibration",
     "run_vertical_single_calibration",
 ]

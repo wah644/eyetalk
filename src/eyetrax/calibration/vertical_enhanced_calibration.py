@@ -156,6 +156,319 @@ def run_vertical_single_calibration(gaze_estimator, camera_index: int = 0,
     return X, y
 
 
+def _capture_offscreen_point(gaze_estimator, cap, sw, sh, direction: str,
+                              target_y: int, cd_d: float = 1.5,
+                              multi_pose: bool = False, multi_pose_d: float = 1.0):
+    """Capture gaze samples for a point that is beyond the screen edge.
+
+    A large arrow and instruction text are shown at the top or bottom of the
+    screen.  The dot is placed at the nearest visible edge but the training
+    TARGET is the off-screen *target_y* so the model learns what looking
+    beyond the screen looks like.
+
+    direction: "above" or "below"
+    """
+    import time as _time
+    center_x = sw // 2
+    is_above  = (direction == "above")
+    dot_y_vis = 18 if is_above else sh - 18   # dot at screen edge (visible)
+    arrow_tip_y   = 10  if is_above else sh - 10
+    arrow_base_y  = 80  if is_above else sh - 80
+    instr = "LOOK ABOVE THE SCREEN" if is_above else "LOOK BELOW THE SCREEN"
+    arrow_col = (0, 220, 255)
+    dot_col_pulse   = (0, 255, 0)
+    dot_col_capture = (0, 0, 255)
+
+    feats, targs = [], []
+
+    def _draw_frame(dot_col):
+        canvas = np.zeros((sh, sw, 3), dtype=np.uint8)
+        # Arrow pointing off-screen
+        pts_arr = np.array([
+            [center_x,          arrow_tip_y],
+            [center_x - 40,     arrow_base_y],
+            [center_x - 15,     arrow_base_y],
+            [center_x - 15,     arrow_base_y + (40 if not is_above else -40)],
+            [center_x + 15,     arrow_base_y + (40 if not is_above else -40)],
+            [center_x + 15,     arrow_base_y],
+            [center_x + 40,     arrow_base_y],
+        ], np.int32)
+        cv2.fillPoly(canvas, [pts_arr], arrow_col)
+        # Instruction text
+        fs, thick = 1.0, 2
+        (tw, th), _ = cv2.getTextSize(instr, cv2.FONT_HERSHEY_SIMPLEX, fs, thick)
+        ty = (sh // 2 - 20) if is_above else (sh // 2 + 30)
+        cv2.putText(canvas, instr, ((sw - tw) // 2, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), thick, cv2.LINE_AA)
+        # Edge dot
+        cv2.circle(canvas, (center_x, dot_y_vis), 8, dot_col, -1)
+        return canvas
+
+    # Pulse phase (no data)
+    ps = _time.time()
+    while _time.time() - ps < 1.0:
+        ok, _ = cap.read()
+        if not ok:
+            continue
+        cv2.imshow("Calibration", _draw_frame(dot_col_pulse))
+        if cv2.waitKey(1) == 27:
+            return None
+
+    # Capture phase
+    cs = _time.time()
+    while _time.time() - cs < cd_d:
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        cv2.imshow("Calibration", _draw_frame(dot_col_capture))
+        if cv2.waitKey(1) == 27:
+            return None
+        ft, blink = gaze_estimator.extract_features(frame)
+        if ft is not None and not blink:
+            feats.append(ft)
+            targs.append(target_y)
+
+    # Multi-pose phase
+    if multi_pose:
+        ms = _time.time()
+        orange = (0, 165, 255)
+        while _time.time() - ms < multi_pose_d:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            cv2.imshow("Calibration", _draw_frame(orange))
+            if cv2.waitKey(1) == 27:
+                return None
+            ft, blink = gaze_estimator.extract_features(frame)
+            if ft is not None and not blink:
+                feats.append(ft)
+                targs.append(target_y)
+
+    return feats, targs
+
+
+def run_vertical_only_calibration(gaze_estimator, camera_index: int = 0,
+                                  cd_d: float = 1.0,
+                                  multi_pose: bool = False, multi_pose_d: float = 1.0,
+                                  train: bool = True):
+    """
+    Vertical-only calibration: 9 points along the center vertical line +
+    2 off-screen anchor points (above and below) to teach the model what
+    extreme gaze positions look like for trie/bigram/backspace gestures.
+    Trains a 1-D model that predicts Y (screen height) exclusively.
+    gaze_estimator.vertical_only is set to True so the runtime substitutes
+    screen_width // 2 for the X coordinate at prediction time.
+    """
+    sw, sh = get_screen_size()
+
+    cap = cv2.VideoCapture(camera_index)
+    if not wait_for_face_and_countdown(cap, gaze_estimator, sw, sh, 2):
+        cap.release()
+        cv2.destroyAllWindows()
+        return None
+
+    num_vertical = 9
+    center_x = sw // 2
+    ys = [int(sh * (0.05 + i * (0.90 / (num_vertical - 1)))) for i in range(num_vertical)]
+    points = [(center_x, y) for y in ys]
+
+    _show_vertical_only_instructions(cap, sw, sh, len(points) + 2)
+
+    # Regular 9-point capture
+    res = _pulse_and_capture(gaze_estimator, cap, points, sw, sh,
+                             cd_d=cd_d,
+                             multi_pose=multi_pose, multi_pose_d=multi_pose_d)
+    if res is None:
+        cap.release()
+        cv2.destroyAllWindows()
+        return None
+
+    feats, targs_2d = res
+
+    # Off-screen above: target Y = -12% of screen height
+    above_target = -int(sh * 0.12)
+    res_above = _capture_offscreen_point(gaze_estimator, cap, sw, sh,
+                                         direction="above", target_y=above_target,
+                                         cd_d=cd_d, multi_pose=multi_pose,
+                                         multi_pose_d=multi_pose_d)
+    if res_above is None:
+        cap.release()
+        cv2.destroyAllWindows()
+        return None
+    feats.extend(res_above[0])
+    targs_2d.extend([[center_x, t] for t in res_above[1]])
+
+    # Off-screen below: target Y = screen_height + 12%
+    below_target = sh + int(sh * 0.12)
+    res_below = _capture_offscreen_point(gaze_estimator, cap, sw, sh,
+                                         direction="below", target_y=below_target,
+                                         cd_d=cd_d, multi_pose=multi_pose,
+                                         multi_pose_d=multi_pose_d)
+    if res_below is None:
+        cap.release()
+        cv2.destroyAllWindows()
+        return None
+    feats.extend(res_below[0])
+    targs_2d.extend([[center_x, t] for t in res_below[1]])
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    if not feats:
+        return None
+
+    X = np.array(feats)
+    y = np.array([t[1] for t in targs_2d])   # Y-only targets (1-D)
+    print(f"[Vertical Only Calibration] Collected {len(feats)} samples from {len(points) + 2} points")
+    if train:
+        gaze_estimator.train(X, y)
+        gaze_estimator.vertical_only = True
+        gaze_estimator.vertical_center_x = center_x
+        print("[Vertical Only Calibration] Training complete (Y-axis only)!")
+        return None
+    return X, y
+
+
+def run_vertical_center_calibration(gaze_estimator, camera_index: int = 0,
+                                    cd_d: float = 1.0,
+                                    multi_pose: bool = False, multi_pose_d: float = 1.0,
+                                    train: bool = True):
+    """
+    9-point center vertical calibration — all points on-screen.
+    Points are evenly spaced from 5% to 95% of screen height along the
+    centre x column. No off-screen anchors. Trains the standard 2-D model.
+    """
+    sw, sh = get_screen_size()
+
+    cap = cv2.VideoCapture(camera_index)
+    if not wait_for_face_and_countdown(cap, gaze_estimator, sw, sh, 2):
+        cap.release()
+        cv2.destroyAllWindows()
+        return None
+
+    num_points = 9
+    center_x = sw // 2
+    ys = [int(sh * (0.05 + i * (0.90 / (num_points - 1)))) for i in range(num_points)]
+    points = [(center_x, y) for y in ys]
+
+    _show_vertical_center_instructions(cap, sw, sh, num_points)
+
+    res = _pulse_and_capture(gaze_estimator, cap, points, sw, sh,
+                             cd_d=cd_d,
+                             multi_pose=multi_pose, multi_pose_d=multi_pose_d)
+    cap.release()
+    cv2.destroyAllWindows()
+
+    if res is None:
+        return None
+
+    feats, targs = res
+    if not feats:
+        return None
+
+    X, y = np.array(feats), np.array(targs)
+    print(f"[Vertical Center Calibration] Collected {len(feats)} samples from {num_points} points")
+    if train:
+        gaze_estimator.train(X, y)
+        print("[Vertical Center Calibration] Training complete!")
+        return None
+    return X, y
+
+
+def _show_vertical_center_instructions(cap, sw, sh, num_points, duration=3):
+    """Show instruction screen before starting the vertical-center calibration."""
+    import time
+    cv2.namedWindow("Calibration", cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty("Calibration", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        ret, _ = cap.read()
+        if not ret:
+            continue
+
+        canvas = np.zeros((sh, sw, 3), dtype=np.uint8)
+        instructions = [
+            "VERTICAL CENTER CALIBRATION",
+            "",
+            f"You will see {num_points} calibration points",
+            "All points are on the centre vertical column",
+            "All points are within the screen",
+            "Look at each GREEN circle as it appears",
+            "Keep your gaze steady during data collection",
+            "",
+            "Starting soon...",
+        ]
+
+        y_offset = sh // 4
+        for i, text in enumerate(instructions):
+            if i == 0:
+                font_scale, thickness, color = 1.5, 3, (0, 255, 255)
+            elif text == "":
+                continue
+            else:
+                font_scale, thickness, color = 1.0, 2, (255, 255, 255)
+
+            size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+            x = (sw - size[0]) // 2
+            y = y_offset + i * 50
+            cv2.putText(canvas, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, color, thickness, cv2.LINE_AA)
+
+        cv2.imshow("Calibration", canvas)
+        if cv2.waitKey(1) == 27:
+            return False
+
+    return True
+
+
+def _show_vertical_only_instructions(cap, sw, sh, num_points, duration=3):
+    """Show instruction screen before starting the vertical-only calibration."""
+    import time
+    cv2.namedWindow("Calibration", cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty("Calibration", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        ret, _ = cap.read()
+        if not ret:
+            continue
+
+        canvas = np.zeros((sh, sw, 3), dtype=np.uint8)
+        instructions = [
+            "VERTICAL-ONLY CALIBRATION",
+            "",
+            f"You will see {num_points} calibration points",
+            "All points are on the centre vertical line",
+            "Look at each GREEN circle as it appears",
+            "Keep your gaze steady during data collection",
+            "",
+            "Predicts vertical position only (Y-axis)",
+            "Starting soon...",
+        ]
+
+        y_offset = sh // 4
+        for i, text in enumerate(instructions):
+            if i == 0:
+                font_scale, thickness, color = 1.5, 3, (0, 255, 255)
+            elif text == "":
+                continue
+            else:
+                font_scale, thickness, color = 1.0, 2, (255, 255, 255)
+
+            size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+            x = (sw - size[0]) // 2
+            y = y_offset + i * 50
+            cv2.putText(canvas, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, color, thickness, cv2.LINE_AA)
+
+        cv2.imshow("Calibration", canvas)
+        if cv2.waitKey(1) == 27:
+            return False
+
+    return True
+
+
 def _show_single_instructions(cap, sw, sh, num_points, duration=3):
     """Show instruction screen before starting the single vertical line calibration"""
     import time

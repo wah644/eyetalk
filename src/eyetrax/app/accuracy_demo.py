@@ -11,6 +11,7 @@ from eyetrax.calibration import (
     run_lissajous_calibration,
     run_multi_position_calibration,
     run_vertical_enhanced_calibration,
+    run_vertical_only_calibration,
     run_vertical_single_calibration,
 )
 from eyetrax.gaze import GazeEstimator
@@ -21,7 +22,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Eye-tracking accuracy demo")
     parser.add_argument(
         "--calibration",
-        choices=["9p", "5p", "vertical", "vertical_single", "lissajous"],
+        choices=["9p", "5p", "vertical", "vertical_single", "vertical-only", "lissajous"],
         default="9p",
         help="Calibration method (default: 9p)",
     )
@@ -112,6 +113,10 @@ def _run_calibration(args, gaze_estimator):
     elif args.calibration == "vertical_single":
         run_vertical_single_calibration(
             gaze_estimator, camera_index=cam, cd_d=cd, multi_pose=mp, multi_pose_d=mpd
+        )
+    elif args.calibration == "vertical-only":
+        run_vertical_only_calibration(
+            gaze_estimator, camera_index=cam, multi_pose=mp, multi_pose_d=mpd
         )
 
 
@@ -234,7 +239,11 @@ def _run_accuracy_test(gaze_estimator, camera_index, capture_duration):
 
             features, blink = gaze_estimator.extract_features(frame)
             if features is not None and not blink:
-                pred = gaze_estimator.predict(np.array([features]))[0]
+                raw = gaze_estimator.predict(np.array([features]))[0]
+                if getattr(gaze_estimator, "vertical_only", False):
+                    pred = [gaze_estimator.vertical_center_x, float(raw)]
+                else:
+                    pred = raw
                 point_preds.append(pred)
 
         if point_preds:

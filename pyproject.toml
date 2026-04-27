@@ -34,6 +34,7 @@ homepage = "https://github.com/ck-zhang/eyetrax"
 eyetrax-demo        = "eyetrax.app.demo:run_demo"
 eyetrax-virtualcam  = "eyetrax.app.virtualcam:run_virtualcam"
 eyetrax-build-model = "eyetrax.app.build_model:main"
+eyetrax-train-swipe = "eyetrax.app.train_swipe:run_training"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/eyetrax"]

@@ -19,9 +19,9 @@ def parse_common_args():
     )
     parser.add_argument(
         "--calibration",
-        choices=["9p", "5p", "lissajous", "vertical"],
+        choices=["9p", "5p", "lissajous", "vertical", "vertical-only", "vertical-center"],
         default="9p",
-        help="Calibration method for gaze estimation, options are '9p', '5p', or 'lissajous'",
+        help="Calibration method for gaze estimation, options are '9p', '5p', 'lissajous', 'vertical', 'vertical-only', or 'vertical-center'",
     )
     parser.add_argument(
         "--background",
@@ -112,6 +112,14 @@ def parse_common_args():
         default=None,
         metavar="PATH",
         help="After calibrating, save the model to this file (e.g. my_calib.pkl)",
+    )
+    parser.add_argument(
+        "--swipe-model",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Path to a swipe-typing template file (.json) produced by eyetrax-train-swipe. "
+             "When provided the keyboard operates in swipe mode.",
     )
 
     return parser.parse_args()
